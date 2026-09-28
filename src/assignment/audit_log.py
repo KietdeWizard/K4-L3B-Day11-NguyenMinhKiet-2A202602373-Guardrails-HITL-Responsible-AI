@@ -27,7 +27,12 @@ class AuditLogPlugin:
 
     def record_input(self, *, user_id: str, text: str, request_id: str | None = None):
         """TODO: store input + start timestamp keyed by request_id/user_id."""
-        raise NotImplementedError("Implement AuditLogPlugin.record_input")
+        key = request_id or user_id
+        now = datetime.now(timezone.utc)
+        self._open[key] = now.timestamp()
+        self.logs.append({"event": "input", "request_id": key, "user_id": user_id,
+                          "input": text, "started_at": now.isoformat()})
+        return key
 
     def record_output(
         self,
@@ -38,15 +43,24 @@ class AuditLogPlugin:
         layer: str | None = None,
         request_id: str | None = None,
     ):
-        """TODO: store output, layer decision, latency; append to self.logs."""
-        raise NotImplementedError("Implement AuditLogPlugin.record_output")
+        """Store output, layer decision, latency; append to self.logs."""
+        key = request_id or user_id
+        finished = datetime.now(timezone.utc)
+        started = self._open.pop(key, finished.timestamp())
+        self.logs.append({"event": "output", "request_id": key, "user_id": user_id,
+                          "output": text, "blocked": bool(blocked), "layer": layer,
+                          "finished_at": finished.isoformat(),
+                          "latency_ms": round(max(0.0, finished.timestamp() - started) * 1000, 3)})
+        return key
 
     def export_json(self, filepath: str | None = None):
         """Write logs to disk (JSON array) under repo-root ``outputs/`` by default."""
         # TODO: path = filepath or default_audit_log_path()
         #       ensure parent dirs exist, dump self.logs with indent=2
-        _ = filepath or default_audit_log_path()
-        raise NotImplementedError("Implement AuditLogPlugin.export_json")
+        path = Path(filepath or default_audit_log_path())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.logs, indent=2, ensure_ascii=False), encoding="utf-8")
+        return str(path)
 
 
 def utc_now_iso() -> str:
